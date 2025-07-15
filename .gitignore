@@ -1,0 +1,85 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+.Ruserdata
+
+# RStudio files
+.Rproj.user/
+*.Rproj
+
+# Example output directories
+output/
+results/
+figures/
+plots/
+
+# Cache and temporary files
+.Rcache/
+__pycache__/
+*.o
+*.so
+*.dll
+*.log
+*.aux
+*.out
+*.toc
+*.tmp
+*.swp
+
+# Data files that shouldn't be tracked (adjust as needed)
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.rds
+*.rda
+*.sav
+
+# Raw microarray data files (e.g., from GEO)
+*.CEL
+*.cel
+*.txt.gz
+*.tar
+*.zip
+
+
+# Compiled reports
+*.pdf
+*.html
+*.docx
+
+# Mac system files
+.DS_Store
+
+# Renv or packrat dependency management
+renv/library/
+renv/python/
+packrat/
+
+# RStudio project files
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# GEO raw data and platform info
+GSE30165_raw/
+GPL*.txt
+
+# Large raw data outputs
+*.CEL
+*.cel
+*.txt.gz
+*.rds
+*.rda
+*.RData
+*.sav
+
+GSE30165_raw/
+*.tar
+*.rds
