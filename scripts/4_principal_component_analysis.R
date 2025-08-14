@@ -84,4 +84,5 @@ library(jsonlite)
 write_json(as.data.frame(expression_matrix), "frontend_expression_matrix.json", pretty = TRUE)
 write_json(pca_df, "frontend_pca_coordinates.json", pretty = TRUE)
 write_json(sample_cor, "frontend_sample_correlation.json", pretty = TRUE)
-write_json(phenodata, "frontend_phenodata.json", pretty = TRUE
+write_json(phenodata, "frontend_phenodata.json", pretty = TRUE)
+

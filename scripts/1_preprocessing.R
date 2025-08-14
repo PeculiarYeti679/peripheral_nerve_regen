@@ -7,7 +7,7 @@ library(dplyr) #data manipulation; summarise
 library(tools) #file name manipulation 
 
 #get all files in the untarred CEL folder with .txt.gz file type
-files <- list.files(".", pattern = "*.txt.gz", full.names = TRUE)
+files <- list.files("./GSE30165_raw/GSE30165/GSE30165_RAW", pattern = "*.txt.gz", full.names = TRUE)
 
 #check for that amount of files in the folder (30) in this case
 length(files)

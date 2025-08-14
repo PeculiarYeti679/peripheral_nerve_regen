@@ -98,3 +98,4 @@ write_json(top10_genes, "DE_results_top10.json", pretty = TRUE)
 topTable_DRG_vs_SN$Gene <- rownames(topTable_DRG_vs_SN)
 topTable_json <- topTable_DRG_vs_SN %>% select(Gene, everything())
 write_json(topTable_json, "DE_results_all_labeled.json", pretty = TRUE)
+
