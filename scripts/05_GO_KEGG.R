@@ -172,62 +172,203 @@ ggplot(cent_df, aes(Time, Z, group = Cluster)) +
 ggsave("final/tcseq_cluster_trajectories_faceted.png", width = 10, height = 7, dpi = 300)
 
 ##########
-#STUCK HERE TRYING TO GET ENTREZ ID
-#######
+
 #GO/KEGG Enrichment 
-library(clusterProfiler)
-library(org.Rn.eg.db)
 library(GEOquery)
+library(limma)
 library(dplyr)
-library(stringr)
 library(tidyr)
+library(stringr)
+library(tibble)
+library(clusterProfiler)
+library(org.Rn.eg.db)   # Rattus norvegicus
+library(AnnotationDbi)
 
-#convert the symbols in the table to entrez id
-symbol_to_entrez <- function(genes) {
-  ids <- AnnotationDbi::mapIds(org.Rn.eg.db, keys=genes, keytype="SYMBOL",
-                               column="ENTREZID", multiVals="first")
-  unname(stats::na.omit(ids))
+#helper functions to get GPL COLUMNS
+find_first <- function(pattern, cn) {
+  hit <- grep(pattern, cn, ignore.case = TRUE, value = TRUE)
+  if (length(hit)) hit[1] else NA_character_
+}
+split_multi <- function(x) {
+  x <- as.character(x)
+  x <- str_replace_all(x, "\\s*///\\s*|\\s*[,;|]\\s*|\\s+/\\s+", ";")
+  ifelse(nzchar(x), x, NA_character_)
+}
+normalize_ens <- function(x) {
+  x <- toupper(as.character(x))
+  sub("\\.\\d+$", "", x)  # strip version suffix .1, .2, ...
+}
+gse <- getGEO("GSE30165", GSEMatrix = TRUE)
+if (is.list(gse)) {
+  esets <- gse
+} else {
+  esets <- list(gse)
 }
 
-gse <- getGEO("GSE30165", GSEMatrix = FALSE) 
-
-gpl_id <- names(GPLList(gse))
-head(gpl_id)
-#download GPL tagse#download GPL table
+gpl_id <- annotation(eset)
 gpl <- getGEO(gpl_id)
-#probe annotations
-p_ann <- Table(gpl)
-head(ann)
-#get possible columns that have the symbols
-possible_cols <- c("ID", "GENE", "GENE_SYMBOL")
-sym_col <- possible_cols[possible_cols %in% colnames(ann)][1]
-stopifnot(!is.null(sym_col))
+ann <- Table(gpl)
+cn <- colnames(ann)
+
+probe_col  <- if (!is.na(find_first("^ID$", cn))) "ID" else if (!is.na(find_first("^ID_REF$", cn))) "ID_REF" else cn[1]
+symbol_col <- find_first("^gene.*symbol$|(^|_)symbol($|_)|symbol", cn)
+ens_col    <- find_first("ensembl", cn)
+entrez_col <- find_first("entrez.*(gene)?\\s*id|geneid|entrezid|entrez_id", cn)
+
+cat("Columns picked:\n  Probe:", probe_col, "\n  SYMBOL:", symbol_col, "\n  ENSEMBL:", ens_col, "\n  ENTREZ:", entrez_col, "\n")
 
 
+annot_raw <- ann |>
+  transmute(
+    ProbeID   = .data[[probe_col]],
+    SYMBOL    = if (!is.na(symbol_col)) split_multi(.data[[symbol_col]]) else NA,
+    ENSEMBL   = if (!is.na(ens_col))    split_multi(.data[[ens_col]])    else NA,
+    ENTREZID0 = if (!is.na(entrez_col)) split_multi(.data[[entrez_col]]) else NA
+  ) |>
+  mutate(
+    SYMBOL    = ifelse(!is.na(SYMBOL),  str_split_fixed(SYMBOL,  ";", 2)[,1], NA),
+    ENSEMBL   = ifelse(!is.na(ENSEMBL), normalize_ens(str_split_fixed(ENSEMBL, ";", 2)[,1]), NA),
+    ENTREZID0 = ifelse(!is.na(ENTREZID0), str_split_fixed(ENTREZID0, ";", 2)[,1], NA)
+  ) |>
+  distinct(ProbeID, .keep_all = TRUE)
 
-#get the clisters with the highest amplitudes (top 2)
-amp <- apply(centroids, 2, function(v) diff(range(v, na.rm=TRUE)))
-highlight <- names(sort(amp, decreasing=TRUE))[1:min(3,length(amp))]
-
-for (clabel in highlight) {
-
-  k <- as.integer(sub("^C","", clabel))
-  genes_k <- dplyr::filter(cluster_df, Cluster==k) |> dplyr::pull(Gene)
-  entrez <- symbol_to_entrez(genes_k)
-  if (length(entrez) < 10) next
-  
-  ego <- enrichGO(entrez, OrgDb=org.Rn.eg.db, keyType="ENTREZID",
-                  ont="BP", pAdjustMethod="BH", qvalueCutoff=0.05, readable=TRUE)
-  ekegg <- enrichKEGG(entrez, organism="rno", pAdjustMethod="BH", qvalueCutoff=0.10)
-  
-  if (!is.null(ego) && nrow(as.data.frame(ego))>0) {
-    p <- dotplot(ego, showCategory=10) + ggtitle(paste("GO BP - Cluster", k))
-    ggsave(paste0("final/GO_BP_cluster_", k, ".png"), p, width=8, height=6, dpi=300)
-    readr::write_csv(as.data.frame(ego), paste0("final/GO_BP_cluster_", k, ".csv"))
-  }
-  if (!is.null(ekegg) && nrow(as.data.frame(ekegg))>0) {
-    p2 <- dotplot(ekegg, showCategory=10) + ggtitle(paste("KEGG - Cluster", k))
-    ggsave(paste0("final/KEGG_cluster_", k, ".png"), p2, width=8, height=6, dpi=300)
-    readr::write_csv(as.data.frame(ekegg), paste0("final/KEGG_cluster_", k, ".csv"))
-  }
+# clean empties
+for (v in c("SYMBOL","ENSEMBL","ENTREZID0")) {
+  annot_raw[[v]][annot_raw[[v]] %in% c("", "NA", "NULL", "null")] <- NA
 }
+
+has_sym <- !is.na(annot_raw$SYMBOL)
+entrez_from_symbol <- rep(NA_character_, nrow(annot_raw))
+if (any(has_sym)) {
+  m <- AnnotationDbi::mapIds(org.Rn.eg.db,
+                             keys    = annot_raw$SYMBOL[has_sym],
+                             keytype = "SYMBOL",
+                             column  = "ENTREZID",
+                             multiVals = "first")
+  entrez_from_symbol[has_sym] <- unname(m[annot_raw$SYMBOL[has_sym]])
+}
+
+is_rat_gene <- !is.na(annot_raw$ENSEMBL) & grepl("^ENSRNOG", annot_raw$ENSEMBL)
+entrez_from_ens <- rep(NA_character_, nrow(annot_raw))
+if (any(is_rat_gene)) {
+  ens_keys <- unique(annot_raw$ENSEMBL[is_rat_gene])
+  m2 <- AnnotationDbi::mapIds(org.Rn.eg.db,
+                              keys    = ens_keys,
+                              keytype = "ENSEMBL",
+                              column  = "ENTREZID",
+                              multiVals = "first")
+  idx <- which(is_rat_gene)
+  ens_vals <- annot_raw$ENSEMBL[idx]
+  entrez_from_ens[idx] <- unname(m2[ens_vals])
+}
+
+annot <- annot_raw |>
+  mutate(ENTREZID = coalesce(ENTREZID0, entrez_from_symbol, entrez_from_ens)) |>
+  dplyr::select(ProbeID, SYMBOL, ENSEMBL, ENTREZID)
+
+# Coverage summary
+cov <- c(
+  platform_entrez = sum(!is.na(annot_raw$ENTREZID0)),
+  via_SYMBOL      = sum(!is.na(entrez_from_symbol)),
+  via_ENSEMBL     = sum(!is.na(entrez_from_ens)),
+  final_nonNA     = sum(!is.na(annot$ENTREZID)),
+  probes_total    = nrow(annot)
+)
+print(cov)
+
+
+#phenodata 
+pd <- pData(eset) |>
+  as.data.frame() |>
+  tibble::rownames_to_column("Sample") |>
+  tibble::as_tibble()
+
+# columns like characteristics_ch1, characteristics_ch1.1, etc.
+char_cols <- grep("^characteristics.*ch1", names(pd), ignore.case = TRUE, value = TRUE)
+
+pd_long <- pd |>
+  dplyr::select(
+    Sample,
+    title,
+    source_name_ch1 = dplyr::any_of("source_name_ch1"),
+    dplyr::all_of(char_cols)
+  ) |>
+  tidyr::pivot_longer(
+    cols = dplyr::starts_with("characteristics"),
+    names_to = "char",
+    values_to = "text",
+    values_drop_na = TRUE
+  ) |>
+  # split on the first ":"; keep the rest in value
+  tidyr::separate(
+    col   = text,
+    into  = c("key","value"),
+    sep   = ":[[:space:]]*",
+    extra = "merge",
+    fill  = "right"
+  ) |>
+  dplyr::mutate(
+    key   = stringr::str_to_lower(stringr::str_trim(key)),
+    value = stringr::str_trim(value)
+  ) |>
+  dplyr::filter(!is.na(key), !is.na(value)) |>
+  dplyr::distinct(Sample, key, .keep_all = TRUE)
+
+pd_wide <- pd_long |>
+  tidyr::pivot_wider(
+    id_cols    = Sample,
+    names_from = key,
+    values_from= value,
+    values_fn  = \(x) x[1]
+  )
+# Heuristics to derive tissue, time, status from any available columns
+all_pd <- pd |>
+  left_join(pd_wide, by = "Sample") |>
+  mutate(
+    tissue = coalesce(
+      .data[["tissue"]], .data[["tissue type"]], .data[["source_name_ch1"]],
+      ifelse(str_detect(title, regex("DRG|dorsal root", ignore_case = TRUE)), "DRG",
+             ifelse(str_detect(title, regex("sciatic|SN", ignore_case = TRUE)), "SN", NA))
+    ),
+    time_raw = coalesce(.data[["time"]], .data[["time point"]], .data[["timepoint"]], .data[["time_point"]], title),
+    status = coalesce(.data[["status"]], .data[["treatment"]], .data[["group"]],
+                      ifelse(str_detect(title, regex("injur|axotom|lesion", ignore_case = TRUE)), "injured",
+                             ifelse(str_detect(title, regex("control|naive|sham|uninjur", ignore_case = TRUE)), "control", NA)))
+  )
+
+# Standardize time to tokens like "0d","1d","4d","1h"...
+parse_time <- function(x) {
+  x <- tolower(x)
+  x <- str_replace_all(x, "days?", "d")
+  x <- str_replace_all(x, "hours?|hrs?", "h")
+  m <- str_match(x, "\\b(\\d+(?:\\.\\d+)?)\\s*(d|h)\\b")
+  out <- ifelse(!is.na(m[,1]), paste0(m[,2], m[,3]), NA)
+  out
+}
+
+all_pd <- all_pd |>
+  mutate(
+    tissue = toupper(str_replace_all(tissue, c("dorsal.*ganglia"="DRG", "sciatic.*"="SN", "sn"="SN"))),
+    time   = parse_time(time_raw),
+    status = tolower(status),
+    status = case_when(
+      str_detect(status, "injur|axotom|lesion") ~ "injured",
+      str_detect(status, "control|naive|sham|uninjur") ~ "control",
+      TRUE ~ status
+    )
+  )
+
+# Keep only rows with essentials
+pheno <- all_pd |>
+  select(Sample, tissue, time, status, title) |>
+  distinct()
+
+# Basic sanity
+cat("Counts by tissue/time/status:\n")
+print(pheno |>
+        count(tissue, time, status) |>
+        arrange(tissue, time, desc(n)))
+stopifnot(all(colnames(exprs(eset)) %in% pheno$Sample))
+# reorder pheno to match expression columns
+pheno <- pheno[match(colnames(exprs(eset)), pheno$Sample), ]
+stopifnot(all(pheno$Sample == colnames(exprs(eset))))
