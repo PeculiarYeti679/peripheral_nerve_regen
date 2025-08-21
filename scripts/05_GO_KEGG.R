@@ -208,167 +208,146 @@ if (is.list(gse)) {
 gpl_id <- annotation(eset)
 gpl <- getGEO(gpl_id)
 ann <- Table(gpl)
-cn <- colnames(ann)
 
-probe_col  <- if (!is.na(find_first("^ID$", cn))) "ID" else if (!is.na(find_first("^ID_REF$", cn))) "ID_REF" else cn[1]
-symbol_col <- find_first("^gene.*symbol$|(^|_)symbol($|_)|symbol", cn)
-ens_col    <- find_first("ensembl", cn)
-entrez_col <- find_first("entrez.*(gene)?\\s*id|geneid|entrezid|entrez_id", cn)
+#get entrez id from the GENE_SYMBOL column of the ann table
+entrez_id <- mapIds(org.Rn.eg.db, keys = ann$GENE_SYMBOL,
+                   column = "ENTREZID", keytype = "SYMBOL")
+#remove any NA 
+entrez_id <- entrez_id[!is.na(entrez_id)]
 
-cat("Columns picked:\n  Probe:", probe_col, "\n  SYMBOL:", symbol_col, "\n  ENSEMBL:", ens_col, "\n  ENTREZ:", entrez_col, "\n")
+sym_candidates <- colnames(ann)[grepl("symbol", colnames(ann), ignore.case = TRUE)]
+sym_col <- if (length(sym_candidates)) sym_candidates[1] else NA_character_
+sym_col
 
-
-annot_raw <- ann |>
+probe2sym <- ann %>%
   transmute(
-    ProbeID   = .data[[probe_col]],
-    SYMBOL    = if (!is.na(symbol_col)) split_multi(.data[[symbol_col]]) else NA,
-    ENSEMBL   = if (!is.na(ens_col))    split_multi(.data[[ens_col]])    else NA,
-    ENTREZID0 = if (!is.na(entrez_col)) split_multi(.data[[entrez_col]]) else NA
-  ) |>
-  mutate(
-    SYMBOL    = ifelse(!is.na(SYMBOL),  str_split_fixed(SYMBOL,  ";", 2)[,1], NA),
-    ENSEMBL   = ifelse(!is.na(ENSEMBL), normalize_ens(str_split_fixed(ENSEMBL, ";", 2)[,1]), NA),
-    ENTREZID0 = ifelse(!is.na(ENTREZID0), str_split_fixed(ENTREZID0, ";", 2)[,1], NA)
-  ) |>
-  distinct(ProbeID, .keep_all = TRUE)
+    ProbeID = ID,
+    SYMBOL_RAW = .data[[sym_col]]
+  ) %>%
+  filter(!is.na(SYMBOL_RAW), SYMBOL_RAW != "") %>%
+  mutate(SYMBOL = str_split(SYMBOL_RAW, "\\s*///\\s*|\\s*[;,]\\s*")) %>%
+  unnest(SYMBOL) %>%
+  mutate(SYMBOL = str_trim(SYMBOL)) %>%
+  filter(SYMBOL != "") %>%
+  distinct(ProbeID, SYMBOL)
+sum(rownames(expression_matrix) %in% probe2sym$ProbeID)
 
-# clean empties
-for (v in c("SYMBOL","ENSEMBL","ENTREZID0")) {
-  annot_raw[[v]][annot_raw[[v]] %in% c("", "NA", "NULL", "null")] <- NA
-}
+head(probe2sym)
 
-has_sym <- !is.na(annot_raw$SYMBOL)
-entrez_from_symbol <- rep(NA_character_, nrow(annot_raw))
-if (any(has_sym)) {
-  m <- AnnotationDbi::mapIds(org.Rn.eg.db,
-                             keys    = annot_raw$SYMBOL[has_sym],
-                             keytype = "SYMBOL",
-                             column  = "ENTREZID",
-                             multiVals = "first")
-  entrez_from_symbol[has_sym] <- unname(m[annot_raw$SYMBOL[has_sym]])
-}
 
-is_rat_gene <- !is.na(annot_raw$ENSEMBL) & grepl("^ENSRNOG", annot_raw$ENSEMBL)
-entrez_from_ens <- rep(NA_character_, nrow(annot_raw))
-if (any(is_rat_gene)) {
-  ens_keys <- unique(annot_raw$ENSEMBL[is_rat_gene])
-  m2 <- AnnotationDbi::mapIds(org.Rn.eg.db,
-                              keys    = ens_keys,
-                              keytype = "ENSEMBL",
-                              column  = "ENTREZID",
-                              multiVals = "first")
-  idx <- which(is_rat_gene)
-  ens_vals <- annot_raw$ENSEMBL[idx]
-  entrez_from_ens[idx] <- unname(m2[ens_vals])
-}
+expr_gene_mat <- as.data.frame(expression_matrix) %>%
+  tibble::rownames_to_column("ProbeID") %>%
+  inner_join(probe2sym, by = "ProbeID") %>%
+  dplyr::select(SYMBOL, all_of(colnames(expression_matrix))) %>%
+  group_by(SYMBOL) %>%
+  summarize(across(everything(), mean, na.rm = TRUE), .groups = "drop") %>%
+  tibble::column_to_rownames("SYMBOL") %>%
+  as.matrix()
 
-annot <- annot_raw |>
-  mutate(ENTREZID = coalesce(ENTREZID0, entrez_from_symbol, entrez_from_ens)) |>
-  dplyr::select(ProbeID, SYMBOL, ENSEMBL, ENTREZID)
+expr_tissue <- expr_gene_mat[, pd_tissue$Sample, drop = FALSE]
 
-# Coverage summary
-cov <- c(
-  platform_entrez = sum(!is.na(annot_raw$ENTREZID0)),
-  via_SYMBOL      = sum(!is.na(entrez_from_symbol)),
-  via_ENSEMBL     = sum(!is.na(entrez_from_ens)),
-  final_nonNA     = sum(!is.na(annot$ENTREZID)),
-  probes_total    = nrow(annot)
+
+expr_tissue <- expr_tissue[rowSums(is.na(expr_tissue)) == 0, , drop = FALSE]
+var_genes <- apply(expr_tissue, 1, var)
+sig_genes <- names(sort(var_genes[is.finite(var_genes)], decreasing = TRUE))[1:min(3000, length(var_genes))]
+expr_deg   <- expr_tissue[rownames(expr_tissue) %in% sig_genes, , drop = FALSE]
+dim(expr_deg)   
+head(rownames(expr_deg))
+
+
+set.seed(42)
+expr_z <- t(scale(t(expr_deg)))
+k_clusters <- 6
+km <- kmeans(expr_z, centers = k_clusters, nstart = 25)
+
+cluster_df <- tibble::tibble(
+  Gene    = rownames(expr_deg),         # <-- SYMBOLs now
+  Cluster = as.integer(km$cluster)
 )
-print(cov)
+
+# centroids for “highlight” selection
+centroids <- sapply(1:k_clusters, function(k) colMeans(expr_z[km$cluster == k, , drop = FALSE]))
+colnames(centroids) <- paste0("C", 1:k_clusters)
+
+# sanity
+table(cluster_df$Cluster)
 
 
-#phenodata 
-pd <- pData(eset) |>
-  as.data.frame() |>
-  tibble::rownames_to_column("Sample") |>
-  tibble::as_tibble()
+library(clusterProfiler); library(org.Rn.eg.db); library(AnnotationDbi)
+dir.create("final", showWarnings = FALSE)
 
-# columns like characteristics_ch1, characteristics_ch1.1, etc.
-char_cols <- grep("^characteristics.*ch1", names(pd), ignore.case = TRUE, value = TRUE)
-
-pd_long <- pd |>
-  dplyr::select(
-    Sample,
-    title,
-    source_name_ch1 = dplyr::any_of("source_name_ch1"),
-    dplyr::all_of(char_cols)
-  ) |>
-  tidyr::pivot_longer(
-    cols = dplyr::starts_with("characteristics"),
-    names_to = "char",
-    values_to = "text",
-    values_drop_na = TRUE
-  ) |>
-  # split on the first ":"; keep the rest in value
-  tidyr::separate(
-    col   = text,
-    into  = c("key","value"),
-    sep   = ":[[:space:]]*",
-    extra = "merge",
-    fill  = "right"
-  ) |>
-  dplyr::mutate(
-    key   = stringr::str_to_lower(stringr::str_trim(key)),
-    value = stringr::str_trim(value)
-  ) |>
-  dplyr::filter(!is.na(key), !is.na(value)) |>
-  dplyr::distinct(Sample, key, .keep_all = TRUE)
-
-pd_wide <- pd_long |>
-  tidyr::pivot_wider(
-    id_cols    = Sample,
-    names_from = key,
-    values_from= value,
-    values_fn  = \(x) x[1]
-  )
-# Heuristics to derive tissue, time, status from any available columns
-all_pd <- pd |>
-  left_join(pd_wide, by = "Sample") |>
-  mutate(
-    tissue = coalesce(
-      .data[["tissue"]], .data[["tissue type"]], .data[["source_name_ch1"]],
-      ifelse(str_detect(title, regex("DRG|dorsal root", ignore_case = TRUE)), "DRG",
-             ifelse(str_detect(title, regex("sciatic|SN", ignore_case = TRUE)), "SN", NA))
-    ),
-    time_raw = coalesce(.data[["time"]], .data[["time point"]], .data[["timepoint"]], .data[["time_point"]], title),
-    status = coalesce(.data[["status"]], .data[["treatment"]], .data[["group"]],
-                      ifelse(str_detect(title, regex("injur|axotom|lesion", ignore_case = TRUE)), "injured",
-                             ifelse(str_detect(title, regex("control|naive|sham|uninjur", ignore_case = TRUE)), "control", NA)))
-  )
-
-# Standardize time to tokens like "0d","1d","4d","1h"...
-parse_time <- function(x) {
-  x <- tolower(x)
-  x <- str_replace_all(x, "days?", "d")
-  x <- str_replace_all(x, "hours?|hrs?", "h")
-  m <- str_match(x, "\\b(\\d+(?:\\.\\d+)?)\\s*(d|h)\\b")
-  out <- ifelse(!is.na(m[,1]), paste0(m[,2], m[,3]), NA)
-  out
+# robust SYMBOL -> ENTREZ mapper
+symbol_to_entrez <- function(genes) {
+  m1 <- AnnotationDbi::mapIds(org.Rn.eg.db, keys = genes, keytype = "SYMBOL",
+                              column = "ENTREZID", multiVals = "first")
+  if (mean(is.na(m1)) > 0.6) {
+    m2 <- AnnotationDbi::mapIds(org.Rn.eg.db, keys = genes, keytype = "ALIAS",
+                                column = "ENTREZID", multiVals = "first")
+    idx <- which(is.na(m1) & !is.na(m2))
+    m1[idx] <- m2[idx]
+  }
+  unname(stats::na.omit(m1))
 }
 
-all_pd <- all_pd |>
-  mutate(
-    tissue = toupper(str_replace_all(tissue, c("dorsal.*ganglia"="DRG", "sciatic.*"="SN", "sn"="SN"))),
-    time   = parse_time(time_raw),
-    status = tolower(status),
-    status = case_when(
-      str_detect(status, "injur|axotom|lesion") ~ "injured",
-      str_detect(status, "control|naive|sham|uninjur") ~ "control",
-      TRUE ~ status
-    )
-  )
+# choose 2–3 clusters with the biggest dynamic range
+amp <- apply(centroids, 2, function(v) diff(range(v, na.rm = TRUE)))
+highlight <- names(sort(amp, decreasing = TRUE))[1:min(3, length(amp))]
+highlight
 
-# Keep only rows with essentials
-pheno <- all_pd |>
-  select(Sample, tissue, time, status, title) |>
-  distinct()
+for (clabel in highlight) {
+  k <- as.integer(sub("^C","", clabel))
+  genes_k <- dplyr::filter(cluster_df, Cluster == k) %>% dplyr::pull(Gene)   # SYMBOLs
+  entrez  <- symbol_to_entrez(genes_k)
+  message(sprintf("Cluster %d: %d genes, %d mapped to ENTREZ", k, length(genes_k), length(entrez)))
+  if (length(entrez) < 10) next
+  
+  ego <- enrichGO(entrez, OrgDb = org.Rn.eg.db, keyType = "ENTREZID",
+                  ont="BP", pAdjustMethod="BH", qvalueCutoff=0.05, readable=TRUE)
+  
+  ekegg <- enrichKEGG(entrez, organism = "rno",
+                      pAdjustMethod="BH", qvalueCutoff=0.10)
+  
+  if (!is.null(ego) && nrow(as.data.frame(ego)) > 0) {
+    p_go <- dotplot(ego, showCategory=10) + ggplot2::ggtitle(sprintf("GO BP - Cluster %d", k))
+    ggsave(sprintf("final/GO_BP_cluster_%d.png", k), p_go, width=8, height=6, dpi=300)
+    readr::write_csv(as.data.frame(ego), sprintf("final/GO_BP_cluster_%d.csv", k))
+  }
+  if (!is.null(ekegg) && nrow(as.data.frame(ekegg)) > 0) {
+    p_kegg <- dotplot(ekegg, showCategory=10) + ggplot2::ggtitle(sprintf("KEGG - Cluster %d", k))
+    ggsave(sprintf("final/KEGG_cluster_%d.png", k), p_kegg, width=8, height=6, dpi=300)
+    # readable KEGG table (optional)
+    try({
+      ekegg_r <- setReadable(ekegg, OrgDb = org.Rn.eg.db, keyType = "ENTREZID")
+      readr::write_csv(as.data.frame(ekegg_r), sprintf("final/KEGG_cluster_%d.csv", k))
+    }, silent = TRUE)
+  }
+}
 
-# Basic sanity
-cat("Counts by tissue/time/status:\n")
-print(pheno |>
-        count(tissue, time, status) |>
-        arrange(tissue, time, desc(n)))
-stopifnot(all(colnames(exprs(eset)) %in% pheno$Sample))
-# reorder pheno to match expression columns
-pheno <- pheno[match(colnames(exprs(eset)), pheno$Sample), ]
-stopifnot(all(pheno$Sample == colnames(exprs(eset))))
+time_lookup <- pd_tissue %>%
+  distinct(time_hours, time) %>%
+  arrange(time_hours)
+
+cent_df <- as.data.frame(centroids) %>%
+  mutate(Sample = colnames(expr_z)) %>%
+  left_join(pd_tissue %>% dplyr::select(Sample, time, time_hours), by = "Sample") %>%
+  tidyr::pivot_longer(-c(Sample, time, time_hours), names_to = "Cluster", values_to = "Z") %>%
+  group_by(Cluster, time, time_hours) %>%
+  summarize(Z = mean(Z, na.rm = TRUE), .groups = "drop") %>%
+  arrange(time_hours)
+
+# Plot with correct breaks/labels
+ggplot2::ggplot(cent_df, ggplot2::aes(time_hours, Z, group = Cluster)) +
+  ggplot2::geom_line() + ggplot2::geom_point() +
+  ggplot2::facet_wrap(~ Cluster, scales = "free_y") +
+  ggplot2::scale_x_continuous(
+    breaks = time_lookup$time_hours,
+    labels = time_lookup$time
+  ) +
+  ggplot2::labs(
+    title = paste("Cluster trajectories (", tissue_of_interest, ")", sep = ""),
+    x = "Time", y = "Mean z-score"
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+
+ggplot2::ggsave("final/kmeans_cluster_trajectories.png", width = 10, height = 7, dpi = 300)
