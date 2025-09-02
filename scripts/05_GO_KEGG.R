@@ -265,13 +265,10 @@ cluster_df <- tibble::tibble(
   Cluster = as.integer(km$cluster)
 )
 
-# centroids for “highlight” selection
 centroids <- sapply(1:k_clusters, function(k) colMeans(expr_z[km$cluster == k, , drop = FALSE]))
 colnames(centroids) <- paste0("C", 1:k_clusters)
 
-# sanity
 table(cluster_df$Cluster)
-
 
 library(clusterProfiler); library(org.Rn.eg.db); library(AnnotationDbi)
 dir.create("final", showWarnings = FALSE)
@@ -289,7 +286,7 @@ symbol_to_entrez <- function(genes) {
   unname(stats::na.omit(m1))
 }
 
-# choose 2–3 clusters with the biggest dynamic range
+
 amp <- apply(centroids, 2, function(v) diff(range(v, na.rm = TRUE)))
 highlight <- names(sort(amp, decreasing = TRUE))[1:min(3, length(amp))]
 highlight
@@ -335,7 +332,7 @@ cent_df <- as.data.frame(centroids) %>%
   summarize(Z = mean(Z, na.rm = TRUE), .groups = "drop") %>%
   arrange(time_hours)
 
-# Plot with correct breaks/labels
+
 ggplot2::ggplot(cent_df, ggplot2::aes(time_hours, Z, group = Cluster)) +
   ggplot2::geom_line() + ggplot2::geom_point() +
   ggplot2::facet_wrap(~ Cluster, scales = "free_y") +

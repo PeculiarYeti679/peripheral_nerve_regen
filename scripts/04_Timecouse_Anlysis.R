@@ -162,3 +162,76 @@ pheatmap(m, clustering_distance_rows = "euclidean",
          main = "Sample–sample distance (Euclidean)")
 dev.off()
 
+
+
+library(dplyr)
+library(readr)
+
+# collect GO terms across clusters
+go_files <- list.files("final", pattern="GO_BP_cluster_\\d+\\.csv", full.names=TRUE)
+go_all <- bind_rows(lapply(go_files, read_csv, show_col_types = FALSE), .id="cluster_id")
+
+# add cluster number
+go_all <- go_all %>%
+  mutate(Cluster = as.integer(gsub("\\D","", cluster_id)))
+
+# top 5 terms per cluster
+go_top5 <- go_all %>%
+  group_by(Cluster) %>%
+  arrange(p.adjust) %>%
+  slice_head(n=5) %>%
+  ungroup()
+
+write_csv(go_top5, "final/GO_BP_top5_summary.csv")
+
+
+# collect KEGG pathways
+kegg_files <- list.files("final", pattern="KEGG_cluster_\\d+\\.csv", full.names=TRUE)
+kegg_all <- bind_rows(lapply(kegg_files, read_csv, show_col_types = FALSE), .id="cluster_id")
+
+kegg_all <- kegg_all %>%
+  mutate(Cluster = as.integer(gsub("\\D","", cluster_id)))
+
+kegg_top5 <- kegg_all %>%
+  group_by(Cluster) %>%
+  arrange(p.adjust) %>%
+  slice_head(n=5) %>%
+  ungroup()
+
+write_csv(kegg_top5, "final/KEGG_top5_summary.csv")
+library(dplyr)
+library(stringr)
+library(readr)
+
+# Load your GO results (combined summary we built earlier)
+go_all <- read_csv("final/GO_BP_top5_summary.csv", show_col_types = FALSE)
+
+# Define theme keywords
+themes <- list(
+  Immune        = c("immune", "cytokine", "leukocyte", "macrophage", "inflammatory", "antigen", "defense"),
+  CellCycle     = c("cell cycle", "mitotic", "replication", "checkpoint", "division", "proliferation"),
+  AxonRepair    = c("axon", "synapse", "neuro", "dendrite", "neuron", "synaptic", "plasticity", "guidance"),
+  Metabolism    = c("metabolic", "oxidative", "mitochond", "respiratory", "glycolysis", "lipid", "glucose"),
+  Stress        = c("stress", "response", "MAPK", "apoptosis", "DNA damage", "hypoxia")
+)
+
+# Function to assign theme
+assign_theme <- function(term) {
+  term_l <- tolower(term)
+  for (th in names(themes)) {
+    if (any(str_detect(term_l, themes[[th]]))) return(th)
+  }
+  return("Other")
+}
+
+# Apply to GO terms
+go_all <- go_all %>%
+  mutate(Theme = sapply(Description, assign_theme))
+
+# Save
+write_csv(go_all, "final/GO_BP_top5_withThemes.csv")
+
+# Same for KEGG
+kegg_all <- read_csv("final/KEGG_top5_summary.csv", show_col_types = FALSE) %>%
+  mutate(Theme = sapply(Description, assign_theme))
+write_csv(kegg_all, "final/KEGG_top5_withThemes.csv")
