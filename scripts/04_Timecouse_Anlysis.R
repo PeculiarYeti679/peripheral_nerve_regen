@@ -1,6 +1,6 @@
-# ==========================================
-# AUTO: all timepoints vs 0d per tissue
-# ==========================================
+#Due to a change in the phenotype data in step 05 there was 
+#an update to data that this script uses so step 05 must be ran first
+
 
 library(limma)
 library(tidyverse)
