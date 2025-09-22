@@ -1,5 +1,10 @@
 if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 BiocManager::install(version = "3.21", ask = FALSE)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("TCseq")
+BiocManager::install("clusterProfiler")
 
 library(tidyverse)
 library(TCseq)

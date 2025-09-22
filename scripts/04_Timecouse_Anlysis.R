@@ -170,6 +170,8 @@ library(readr)
 # collect GO terms across clusters
 go_files <- list.files("final", pattern="GO_BP_cluster_\\d+\\.csv", full.names=TRUE)
 go_all <- bind_rows(lapply(go_files, read_csv, show_col_types = FALSE), .id="cluster_id")
+colnames(go_all)
+head(go_all)
 
 # add cluster number
 go_all <- go_all %>%
@@ -230,6 +232,7 @@ go_all <- go_all %>%
 
 # Save
 write_csv(go_all, "final/GO_BP_top5_withThemes.csv")
+list.files("final", pattern="GO_BP_cluster_\\d+\\.csv")
 
 # Same for KEGG
 kegg_all <- read_csv("final/KEGG_top5_summary.csv", show_col_types = FALSE) %>%
