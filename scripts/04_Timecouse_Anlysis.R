@@ -1,5 +1,5 @@
 #Due to a change in the phenotype data in step 05 there was 
-#an update to data that this script uses so step 05 must be ran first
+#an update to data that this script uses so step 05 must be ran first. 
 
 
 library(limma)
@@ -8,31 +8,33 @@ library(pheatmap)
 library(janitor)
 library(GEOquery)
 
-# ---------- Inputs assumed ----------
-# expr  : expression matrix (probes x samples)
-# pheno : data.frame with columns Sample, tissue, time
+
+# expr: expression matrix (probes x samples)
+# pheno: data.frame with columns Sample, tissue, time
+# check to see of the sample names match before continuing
 stopifnot(all(colnames(expr) == pheno$Sample))
 
-# ---------- Folders ----------
+# output folder
 dir.create("outputs/figures", showWarnings = FALSE, recursive = TRUE)
 dir.create("outputs/tables",  showWarnings = FALSE, recursive = TRUE)
 
-# ---------- Design (only existing levels) ----------
+# drop data that does not contain tissue and time
 pheno$tissue <- droplevels(factor(pheno$tissue))
 pheno$time   <- droplevels(factor(pheno$time))
 
+#create design matrix using tissue and time
 design <- model.matrix(~ 0 + tissue:time, data = pheno)
 colnames(design) <- make.names(colnames(design))
 
-# ---------- Build contrasts dynamically ----------
+# create the contrasts at 0d
 times   <- setdiff(levels(pheno$time), "0d")         # all non-baseline timepoints present
 tissues <- levels(pheno$tissue)                       # DRG, SN (from your data)
 
-# Expressions like: "DRG_1d_vs_0d = tissueDRG.time1d - tissueDRG.time0d"
+# looking for the contrasts where like 0d
 contrast_specs <- unlist(lapply(tissues, function(ti) {
   paste0(ti, "_", times, "_vs_0d = tissue", ti, ".time", times, " - tissue", ti, ".time0d")
 }))
-# Keep only contrasts whose terms actually exist in the design (defensive)
+# filter the contrasts for where there are data
 cols_in_design <- colnames(design)
 is_valid <- function(expr_str) {
   parts <- strsplit(gsub(" ", "", strsplit(expr_str, "=")[[1]][2]), "-|\\+")[[1]]
@@ -44,11 +46,15 @@ stopifnot(length(contrast_specs) > 0)
 
 contrast_matrix <- do.call(makeContrasts, c(list(levels = design), as.list(contrast_specs)))
 
-# ---------- Fit ----------
+# create linear model 
 fit  <- lmFit(expr, design)
+# model with Bayes shrinkage to standard error
+# this helps with stability in variance
 fit2 <- eBayes(contrasts.fit(fit, contrast_matrix))
 
-# ---------- Annotation (GPL7294) ----------
+# annotate GPL7294
+#normalize the column names and allows to from probeID to 
+#symbol, entrez and gene name
 gpl      <- GEOquery::getGEO("GPL7294", AnnotGPL = TRUE)
 gpl_tbl  <- Table(gpl) |> as_tibble() |> clean_names()
 annot <- gpl_tbl %>%
@@ -59,7 +65,8 @@ annot <- gpl_tbl %>%
     GENE    = coalesce(gene_name, description)
   ) %>% distinct(ProbeID, .keep_all = TRUE)
 
-# ---------- Helpers ----------
+# get ranked table
+# looking for signifcance value dj.P.Val < 0.05 and  abs(logFC) >= 1
 get_annotated <- function(fit2, coef_name, annot, out_stub) {
   tt <- limma::topTable(fit2, coef = coef_name, number = Inf, adjust = "fdr") |>
     tibble::rownames_to_column("ProbeID") |>
@@ -70,6 +77,7 @@ get_annotated <- function(fit2, coef_name, annot, out_stub) {
   tt
 }
 
+#far right or left indicate a significant change
 plot_volcano <- function(tt_annot, title, out_png) {
   p <- ggplot(tt_annot, aes(logFC, -log10(adj.P.Val), color = sig)) +
     geom_point(alpha = 0.7, size = 1.2) +
@@ -81,6 +89,7 @@ plot_volcano <- function(tt_annot, title, out_png) {
   ggsave(out_png, p, width = 7, height = 5, dpi = 300)
 }
 
+#create heatmap to see if clusters of samples group together
 plot_heatmap_topN <- function(tt_annot, expr, pheno, N, out_png) {
   probes <- intersect(tt_annot$ProbeID, rownames(expr))
   topn   <- head(probes, N)
@@ -119,7 +128,7 @@ plot_qq <- function(fit2, coef_name, out_png) {
   dev.off()
 }
 
-# ---------- Run for every contrast ----------
+# running these for all contrasts
 all_contrasts <- colnames(contrast_matrix)
 
 for (cn in all_contrasts) {
@@ -136,7 +145,7 @@ for (cn in all_contrasts) {
   plot_qq(fit2, cn, file.path("outputs/figures", paste0("QQ_", out_stub, ".png")))
 }
 
-# ---------- Optional: global QC once ----------
+# QC data 
 # PCA
 expr_t <- t(expr)
 pc     <- prcomp(expr_t, scale. = TRUE)
@@ -148,7 +157,7 @@ p <- ggplot(pdat, aes(PC1, PC2, color = tissue, shape = time)) +
   labs(title = "PCA of Expression", color = "Tissue", shape = "Time")
 ggsave("outputs/figures/PCA_tissue_time.png", p, width = 7, height = 5, dpi = 300)
 
-# Sample–sample distance
+# sample–sample distance
 d <- dist(t(expr)); m <- as.matrix(d)
 annS <- pheno |>
   transmute(Sample = Sample, tissue = tissue, time = time) |>
@@ -205,10 +214,10 @@ library(dplyr)
 library(stringr)
 library(readr)
 
-# Load your GO results (combined summary we built earlier)
+
 go_all <- read_csv("final/GO_BP_top5_summary.csv", show_col_types = FALSE)
 
-# Define theme keywords
+# define theme keywords
 themes <- list(
   Immune        = c("immune", "cytokine", "leukocyte", "macrophage", "inflammatory", "antigen", "defense"),
   CellCycle     = c("cell cycle", "mitotic", "replication", "checkpoint", "division", "proliferation"),
@@ -217,7 +226,7 @@ themes <- list(
   Stress        = c("stress", "response", "MAPK", "apoptosis", "DNA damage", "hypoxia")
 )
 
-# Function to assign theme
+# function to assign theme
 assign_theme <- function(term) {
   term_l <- tolower(term)
   for (th in names(themes)) {
@@ -226,15 +235,15 @@ assign_theme <- function(term) {
   return("Other")
 }
 
-# Apply to GO terms
+# apply to GO terms
 go_all <- go_all %>%
   mutate(Theme = sapply(Description, assign_theme))
 
-# Save
+# save
 write_csv(go_all, "final/GO_BP_top5_withThemes.csv")
 list.files("final", pattern="GO_BP_cluster_\\d+\\.csv")
 
-# Same for KEGG
+# KEGG
 kegg_all <- read_csv("final/KEGG_top5_summary.csv", show_col_types = FALSE) %>%
   mutate(Theme = sapply(Description, assign_theme))
 write_csv(kegg_all, "final/KEGG_top5_withThemes.csv")
