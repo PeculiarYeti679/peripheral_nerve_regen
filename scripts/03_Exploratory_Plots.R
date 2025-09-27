@@ -1,10 +1,11 @@
-# =========================
+##########################
 # PLOTS & EXPORT HELPERS
-# =========================
+##########################
 
+#creae output directory for the figures provided 
 dir.create("outputs/figures", showWarnings = FALSE, recursive = TRUE)
 
-# 1) Get annotated topTable for a contrast
+#create the annotated table and save it to be used in other steps
 get_annotated <- function(fit2, coef_name, annot, out_stub) {
   tt <- limma::topTable(fit2, coef = coef_name, number = Inf, adjust = "fdr") |>
     tibble::rownames_to_column("ProbeID") |>
@@ -16,7 +17,9 @@ get_annotated <- function(fit2, coef_name, annot, out_stub) {
   tt
 }
 
-# 2) Volcano plot (ggplot)
+#create a volacano plot
+#log2FC vs -log10 FDR-adjusted P-value
+#red denotes a significant DEGs
 plot_volcano <- function(tt_annot, title, out_png) {
   p <- ggplot2::ggplot(tt_annot, ggplot2::aes(logFC, -log10(adj.P.Val), color = sig)) +
     ggplot2::geom_point(alpha = 0.7, size = 1.2) +
@@ -29,7 +32,9 @@ plot_volcano <- function(tt_annot, title, out_png) {
   p
 }
 
-# 3) Heatmap of top-N probes
+#create heatmap of top-N probes
+#50 in this case
+#add annotations 
 plot_heatmap_topN <- function(tt_annot, expr, pheno, N = 50, out_png) {
   probes <- intersect(tt_annot$ProbeID, rownames(expr))
   topn   <- head(probes, N)
@@ -55,7 +60,7 @@ plot_heatmap_topN <- function(tt_annot, expr, pheno, N = 50, out_png) {
   grDevices::dev.off()
 }
 
-# 4) MD (MA) plot from limma for a contrast
+#create MD (MA) plot from limma for a contrast
 plot_md <- function(fit2, coef_name, out_png) {
   grDevices::png(out_png, width = 800, height = 600, res = 120)
   limma::plotMD(fit2, coef = coef_name, status = NULL, main = paste("MD plot:", coef_name))
@@ -63,7 +68,7 @@ plot_md <- function(fit2, coef_name, out_png) {
   grDevices::dev.off()
 }
 
-# 5) QQ plot of moderated t-statistics
+#create QQ plot of  t-statistics
 plot_qq <- function(fit2, coef_name, out_png) {
   tvals <- fit2$t[, coef_name]
   df    <- fit2$df.total[1]
@@ -72,7 +77,7 @@ plot_qq <- function(fit2, coef_name, out_png) {
   grDevices::dev.off()
 }
 
-# 6) PCA colored by tissue and time (nice overview)
+#create PCA colored by tissue and time 
 plot_pca <- function(expr, pheno, out_png) {
   expr_t <- t(expr)
   pc     <- prcomp(expr_t, scale. = TRUE)
@@ -91,11 +96,11 @@ plot_pca <- function(expr, pheno, out_png) {
   p
 }
 
-# 7) Sample–sample distance heatmap (another QC view)
+#create Sample–sample distance heatmap (another QC view)
 plot_sample_distance <- function(expr, pheno, out_png) {
-  d <- dist(t(expr))                       # samples in columns -> transpose
+  d <- dist(t(expr))                       # trasnpose the samples
   m <- as.matrix(d)
-  # Make annotation for columns/rows (same samples & order)
+  # make annotation for columns/rows (same samples and order)
   ann <- pheno |>
     dplyr::transmute(Sample = Sample, tissue = tissue, time = time) |>
     tibble::column_to_rownames("Sample")
@@ -109,9 +114,11 @@ plot_sample_distance <- function(expr, pheno, out_png) {
   grDevices::dev.off()
 }
 
-# =========================
+##########################
 # RUN FOR BOTH CONTRASTS
-# =========================
+##########################
+#below will look at the differnces in 1d and 0d
+#this will be for DRG and SN respectively
 
 # DRG 1d vs 0d
 drg_tt <- get_annotated(fit2, "DRG_1d_vs_0d", annot, "DRG_1d_vs_0d")
@@ -127,11 +134,11 @@ plot_heatmap_topN(sn_tt, expr, pheno, 50, "outputs/figures/heatmap_top50_SN_1d_v
 plot_md(fit2, "SN_1d_vs_0d", "outputs/figures/MD_SN_1d_vs_0d.png")
 plot_qq(fit2, "SN_1d_vs_0d", "outputs/figures/QQ_SN_1d_vs_0d.png")
 
-# Global QC / overview (once)
+# global pca to check data quality 
 plot_pca(expr, pheno, "outputs/figures/PCA_tissue_time.png")
 plot_sample_distance(expr, pheno, "outputs/figures/sample_distance_heatmap.png")
 
-# 8) Optional: Venn overlap of significant DEGs between contrasts
+# create Venn diagram overlap of significant DEGs between contrasts
 sig_drg <- drg_tt$ProbeID[drg_tt$sig]
 sig_sn  <- sn_tt$ProbeID[sn_tt$sig]
 venn_mat <- cbind(DRG_1d_vs_0d = rownames(expr) %in% sig_drg,
