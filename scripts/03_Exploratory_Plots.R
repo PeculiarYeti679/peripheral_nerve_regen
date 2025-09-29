@@ -1,7 +1,31 @@
-##########################
-# PLOTS & EXPORT HELPERS
-##########################
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 
+# List everything you need (Bioc + CRAN)
+needs <- c(
+  "TCseq", "clusterProfiler", "org.Rn.eg.db", "AnnotationDbi", # Bioc
+  "GEOquery", "limma",                                         # Bioc
+  "pheatmap", "ggplot2", "tidyverse", "janitor"                # CRAN
+)
+
+# What’s missing?
+to_install <- needs[!vapply(needs, requireNamespace, logical(1), quietly = TRUE)]
+
+# Install missing ones with NO update prompts
+if (length(to_install)) {
+  # BiocManager::install can handle both Bioc and CRAN when repos are set
+  BiocManager::install(to_install, update = FALSE, ask = FALSE)
+}
+
+library(tidyverse)
+library(TCseq)
+library(clusterProfiler)
+library(org.Rn.eg.db)
+library(AnnotationDbi)
+library(GEOquery)
+library(limma)
+library(pheatmap)
+library(ggplot2)
+library(janitor)
 #creae output directory for the figures provided 
 dir.create("outputs/figures", showWarnings = FALSE, recursive = TRUE)
 
