@@ -7,10 +7,9 @@ needs <- c(
   "pheatmap", "ggplot2", "tidyverse", "janitor"                # CRAN
 )
 
-# What’s missing?
+
 to_install <- needs[!vapply(needs, requireNamespace, logical(1), quietly = TRUE)]
 
-# Install missing ones with NO update prompts
 if (length(to_install)) {
   # BiocManager::install can handle both Bioc and CRAN when repos are set
   BiocManager::install(to_install, update = FALSE, ask = FALSE)

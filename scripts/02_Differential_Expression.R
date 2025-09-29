@@ -1,8 +1,36 @@
 #Design matrices and analyze data
 
-library(limma)
-library(tidyverse)
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
 
+needed <- c(
+  "AnnotationDbi", "org.Rn.eg.db", "TCseq", "clusterProfiler",
+  "GEOquery", "limma", "janitor", "pheatmap", "ggplot2", "tidyverse", "ggrepel"
+)
+
+to_install <- setdiff(needed, rownames(installed.packages()))
+if (length(to_install)) {
+  BiocManager::install(to_install, ask = FALSE, update = FALSE)
+}
+
+
+update.packages(ask = FALSE, checkBuilt = TRUE)
+install.packages("rmarkdown", dependencies = TRUE)
+
+suppressPackageStartupMessages({
+  library(AnnotationDbi)
+  library(org.Rn.eg.db)     # rat annotation
+  library(TCseq)
+  library(clusterProfiler)
+  library(GEOquery)
+  library(limma)
+  
+  library(janitor)
+  library(pheatmap)
+  library(ggplot2)
+  library(tidyverse)
+})
 #read in saved data
 #this is processed in 01_Data_Acquistion_Normalization
 expr <- readRDS("data/processed/expression_matrix_processed.rds")
@@ -47,19 +75,6 @@ fit2 <- eBayes(fit2)
 topTable_DRG <- topTable(fit2, coef = "DRG_1d_vs_0d", number = Inf, adjust = "fdr")
 head(topTable_DRG)
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("AnnotationDbi")
-
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("org.Rn.eg.db")
-#load in libraries for annotations
-library(AnnotationDbi)
-library(org.Rn.eg.db) #rattus norvegicus
-library(janitor)
 
 gpl <- GEOquery::getGEO("GPL7294", AnnotGPL = TRUE)
 gpl_tbl <- Table(gpl) |> as_tibble() |> clean_names()

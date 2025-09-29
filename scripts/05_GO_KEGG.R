@@ -1,10 +1,17 @@
-if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install(version = "3.21", ask = FALSE)
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
+options(repos = BiocManager::repositories())
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 
-BiocManager::install("TCseq")
-BiocManager::install("clusterProfiler")
+needed <- c(
+  # Bioconductor
+  "TCseq","clusterProfiler","org.Rn.eg.db","AnnotationDbi","GEOquery","limma",
+  # CRAN
+  "pheatmap","ggplot2","tidyverse","janitor"
+)
+to_install <- needed[!vapply(needed, requireNamespace, logical(1), quietly = TRUE)]
+if (length(to_install)) {
+  BiocManager::install(to_install, update = FALSE, ask = FALSE)  # <- no prompts
+}
+
 
 library(tidyverse)
 library(TCseq)

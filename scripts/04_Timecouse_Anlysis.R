@@ -243,7 +243,7 @@ go_all <- go_all %>%
 write_csv(go_all, "final/GO_BP_top5_withThemes.csv")
 list.files("final", pattern="GO_BP_cluster_\\d+\\.csv")
 
-# KEGG
+# same for KEGG
 kegg_all <- read_csv("final/KEGG_top5_summary.csv", show_col_types = FALSE) %>%
   mutate(Theme = sapply(Description, assign_theme))
 write_csv(kegg_all, "final/KEGG_top5_withThemes.csv")
